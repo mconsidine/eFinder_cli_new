@@ -203,6 +203,7 @@ export DEBIAN_FRONTEND=noninteractive
 export EFINDER_CHROOT=1
 export EFINDER_VERSION="${EFINDER_VERSION}"
 ${CEDAR_DETECT_BIN_LOCAL:+export EFINDER_CEDAR_DETECT_BIN_LOCAL=/tmp/efinder-src/cedar-detect-server.aarch64}
+${EFINDER_CEDAR_SOLVE_REF:+export EFINDER_CEDAR_SOLVE_REF="${EFINDER_CEDAR_SOLVE_REF}"}
 
 cd /tmp/efinder-src
 bash scripts/install.sh

@@ -169,6 +169,21 @@ jobs:
             exit 1
           }
 
+      - name: Resolve cedar-solve commit
+        id: cedar_solve
+        # Capture the current master HEAD so the image bakes a specific
+        # commit rather than "whatever's there when build-image.sh runs".
+        # Without this, two images built minutes apart could differ.
+        run: |
+          SHA=$(git ls-remote https://github.com/smroid/cedar-solve.git \
+                refs/heads/master | awk '{print $1}')
+          if [ -z "$SHA" ]; then
+            echo "::error::Could not resolve cedar-solve master SHA"
+            exit 1
+          fi
+          echo "Resolved cedar-solve master: $SHA"
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
       - name: Run image build
         env:
           EFINDER_VERSION: ${{ steps.ver.outputs.tag }}
@@ -177,6 +192,8 @@ jobs:
           # from a release URL. This is the only path during CI because
           # the release may not be fully populated yet.
           CEDAR_DETECT_BIN_LOCAL: ${{ github.workspace }}/build/output/cedar-detect-server
+          # Pin cedar-solve to the resolved commit for reproducibility.
+          EFINDER_CEDAR_SOLVE_REF: ${{ steps.cedar_solve.outputs.sha }}
         run: |
           sudo -E bash build/build-image.sh
 

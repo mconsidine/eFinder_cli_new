@@ -113,8 +113,21 @@ fi
 LOG "Installing Python deps"
 sudo -u "$EFINDER_USER" "$EFINDER_DIR/venv/bin/pip" install --upgrade pip \
   || FAIL "pip install --upgrade pip failed"
-sudo -u "$EFINDER_USER" "$EFINDER_DIR/venv/bin/pip" install \
-  -r "$EFINDER_DIR/requirements.txt" \
+
+# Optionally pin cedar-solve to a specific commit/tag for reproducibility.
+# Default is whatever requirements.txt has (which is @master).
+CEDAR_SOLVE_REF="${EFINDER_CEDAR_SOLVE_REF:-}"
+REQ_FILE="$EFINDER_DIR/requirements.txt"
+if [ -n "$CEDAR_SOLVE_REF" ]; then
+  LOG "Pinning cedar-solve to ref: $CEDAR_SOLVE_REF"
+  REQ_FILE=$(mktemp)
+  trap "rm -f $REQ_FILE" EXIT
+  sed "s|cedar-solve.git@master|cedar-solve.git@$CEDAR_SOLVE_REF|" \
+    "$EFINDER_DIR/requirements.txt" > "$REQ_FILE"
+  chown "$EFINDER_USER:$EFINDER_USER" "$REQ_FILE"
+fi
+
+sudo -u "$EFINDER_USER" "$EFINDER_DIR/venv/bin/pip" install -r "$REQ_FILE" \
   || FAIL "pip install requirements.txt failed"
 
 # --- Install cedar-detect-server -----------------------------------

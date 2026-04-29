@@ -49,9 +49,43 @@ build/build-image.sh    Chroot-based Pi image builder
 ## How users get it
 
 1. Download the latest `efinder-vX.Y.Z.img.xz` from GitHub releases.
-2. Flash with Raspberry Pi Imager. **Click the gear icon, set Wi-Fi.**
-3. Boot. First-boot service runs (~30s on first power-on).
-4. Connect SkySafari to `<hostname>.local:4060` (default LX200 port).
+2. Flash to an SD card with `dd`, balena Etcher, or Pi Imager. No
+   special configuration needed in Pi Imager -- the eFinder image
+   sets up its own network on first boot.
+3. Boot. First-boot service runs (~30-60s on first power-on); the Pi
+   creates a Wi-Fi access point and a USB Ethernet gadget.
+4. Reach the Pi by either:
+    * **USB cable:** plug from your computer into the Pi's middle
+      micro-USB port (the data port, not the leftmost power port).
+      Your computer sees a new Ethernet interface come up; ssh to
+      `efinder@10.55.0.1` or `efinder@efinder.local` with password
+      `12345678`.
+    * **Wi-Fi AP:** look for an SSID like `efinder-XXXX` on your
+      phone or laptop. Connect with WPA2 password `12345678`.
+      Once connected, ssh to `efinder@10.42.0.1` or
+      `efinder@efinder.local` with password `12345678`.
+
+   These are deliberately weak credentials; the device operates on
+   private networks only and is not exposed to the public internet.
+
+5. Optional: switch the Pi from AP mode to joining your home Wi-Fi:
+   ```
+   sudo /usr/local/bin/station.sh "MySSID" "MyPassword"
+   ```
+   To switch back to AP mode later: `sudo /usr/local/bin/ap.sh`.
+6. Connect SkySafari to `efinder.local:4060` (LX200 protocol).
+   Works on either AP, station, or upstream Wi-Fi.
+
+### A note on `efinder.local` resolution
+
+mDNS (`.local`) resolution depends on the client OS:
+- **Linux, macOS, iOS** -- works out of the box.
+- **Windows** -- requires Bonjour Service installed (comes with iTunes
+  or many printer drivers), or use the IP address directly.
+- **Android** -- system-wide `.local` resolution is unreliable, but
+  most SSH apps (Termux, JuiceSSH) handle it. If `.local` doesn't
+  resolve in your app, use `10.42.0.1` (AP mode) or `10.55.0.1` (USB
+  tether) directly.
 
 For SSH-comfortable users on a fresh Trixie Lite SD card, `bash
 scripts/install.sh` works as an alternative to flashing the prebuilt image.

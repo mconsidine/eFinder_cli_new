@@ -58,7 +58,14 @@ fi
 if ! id -u "$EFINDER_USER" >/dev/null 2>&1; then
   LOG "Creating user $EFINDER_USER"
   useradd -m -s /bin/bash "$EFINDER_USER"
-  usermod -aG video,gpio,i2c,dialout "$EFINDER_USER" || true
+  # Password '12345678'. Per project decision: no security risk for this
+  # device (always operates on private networks; user is the device owner).
+  echo "${EFINDER_USER}:12345678" | chpasswd
+  # Groups:
+  #   video/gpio/i2c/dialout  hardware access (camera, GPIO, etc.)
+  #   sudo                    so ap.sh / station.sh / efinder-update work
+  #   netdev                  so nmcli works without sudo for some ops
+  usermod -aG video,gpio,i2c,dialout,sudo,netdev "$EFINDER_USER" || true
 fi
 
 # --- System packages ----------------------------------------------------------
@@ -73,7 +80,14 @@ apt-get install -y --no-install-recommends \
   python3-flask \
   build-essential pkg-config \
   curl ca-certificates git \
-  protobuf-compiler
+  protobuf-compiler \
+  avahi-daemon \
+  openssh-server \
+  network-manager
+
+# SSH on by default. Pi OS Lite has had this off-by-default in some
+# recent images; ensure it's enabled so the user can ssh in immediately.
+systemctl enable ssh.service 2>/dev/null || systemctl enable ssh.socket || true
 
 # --- Application code ---------------------------------------------------------
 
@@ -231,6 +245,8 @@ install -m 440 "$EFINDER_DIR/etc/sudoers.d/efinder-update" /etc/sudoers.d/efinde
 
 install -m 755 "$EFINDER_DIR/scripts/efinder-update" /usr/local/bin/
 install -m 755 "$EFINDER_DIR/scripts/efinder-ctl"    /usr/local/bin/
+install -m 755 "$EFINDER_DIR/scripts/ap.sh"          /usr/local/bin/ap.sh
+install -m 755 "$EFINDER_DIR/scripts/station.sh"     /usr/local/bin/station.sh
 # firstboot.sh runs in place from /opt/efinder/scripts/ per the systemd
 # unit (no copy needed); just ensure it's executable.
 chmod 755 "$EFINDER_DIR/scripts/firstboot.sh"
@@ -250,6 +266,8 @@ fi
 # --- Boot config / kernel options --------------------------------------------
 
 CONFIG_TXT=/boot/firmware/config.txt
+CMDLINE_TXT=/boot/firmware/cmdline.txt
+
 if [ -f "$CONFIG_TXT" ]; then
   if ! grep -q "^camera_auto_detect=1" "$CONFIG_TXT"; then
     LOG "Enabling camera_auto_detect in $CONFIG_TXT"
@@ -257,6 +275,35 @@ if [ -f "$CONFIG_TXT" ]; then
   fi
   if ! grep -q "^enable_uart=1" "$CONFIG_TXT"; then
     echo "enable_uart=1" >> "$CONFIG_TXT"
+  fi
+  # USB Ethernet gadget mode -- lets the Pi appear as a network device
+  # when plugged into the host's USB port via the Pi's USB data port
+  # (the middle micro-USB on the Zero 2W, NOT the leftmost PWR port).
+  # Once active, the host sees a new Ethernet interface; Avahi broadcasts
+  # over it, so `ssh efinder.local` works without Wi-Fi or HDMI.
+  if ! grep -q "^dtoverlay=dwc2" "$CONFIG_TXT"; then
+    LOG "Enabling USB gadget mode (dwc2) in $CONFIG_TXT"
+    echo "" >> "$CONFIG_TXT"
+    echo "# USB Ethernet gadget mode -- see /boot/firmware/cmdline.txt" >> "$CONFIG_TXT"
+    echo "dtoverlay=dwc2" >> "$CONFIG_TXT"
+  fi
+fi
+
+# cmdline.txt is one long single line; we splice into it rather than
+# append. The kernel parses each space-separated token as a parameter.
+if [ -f "$CMDLINE_TXT" ]; then
+  if ! grep -q "modules-load=.*\bdwc2\b" "$CMDLINE_TXT"; then
+    LOG "Adding dwc2,g_ether modules-load to $CMDLINE_TXT"
+    # Backup once
+    [ -f "$CMDLINE_TXT.efinder-orig" ] || cp "$CMDLINE_TXT" "$CMDLINE_TXT.efinder-orig"
+    # Insert after rootwait (a common anchor in stock cmdline.txt) so
+    # the parameter ordering stays sensible. If rootwait isn't present,
+    # just prepend.
+    if grep -q "rootwait" "$CMDLINE_TXT"; then
+      sed -i 's/rootwait/rootwait modules-load=dwc2,g_ether/' "$CMDLINE_TXT"
+    else
+      sed -i '1s|^|modules-load=dwc2,g_ether |' "$CMDLINE_TXT"
+    fi
   fi
 fi
 

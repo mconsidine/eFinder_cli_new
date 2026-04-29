@@ -30,6 +30,8 @@ for f in \
   scripts/firstboot.sh \
   scripts/efinder-update \
   scripts/efinder-ctl \
+  scripts/ap.sh \
+  scripts/station.sh \
   build/build-image.sh \
   proto/cedar_detect.proto \
   systemd/cedar-detect.service \
@@ -60,6 +62,7 @@ done
 # 3. Shell scripts must parse
 LOG "Checking shell scripts parse"
 for s in scripts/install.sh scripts/firstboot.sh scripts/efinder-update \
+         scripts/ap.sh scripts/station.sh \
          build/build-image.sh build/check-tree.sh; do
   bash -n "$s" || FAIL "$s has syntax errors"
 done

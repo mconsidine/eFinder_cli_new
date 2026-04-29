@@ -171,18 +171,23 @@ jobs:
 
       - name: Resolve cedar-solve commit
         id: cedar_solve
-        # Capture the current master HEAD so the image bakes a specific
-        # commit rather than "whatever's there when build-image.sh runs".
-        # Without this, two images built minutes apart could differ.
+        # We pin to a specific cedar-solve release tag (default v0.6.0).
+        # Bumping the version is an explicit choice: change the
+        # vars.CEDAR_SOLVE_TAG repo variable, or override here.
+        # Resolving the tag's commit SHA at build time gives
+        # reproducible images without needing to edit this file.
+        env:
+          CEDAR_SOLVE_TAG: ${{ vars.CEDAR_SOLVE_TAG || 'v0.6.0' }}
         run: |
           SHA=$(git ls-remote https://github.com/smroid/cedar-solve.git \
-                refs/heads/master | awk '{print $1}')
+                "refs/tags/${CEDAR_SOLVE_TAG}" | awk '{print $1}')
           if [ -z "$SHA" ]; then
-            echo "::error::Could not resolve cedar-solve master SHA"
+            echo "::error::Could not resolve cedar-solve tag ${CEDAR_SOLVE_TAG}"
             exit 1
           fi
-          echo "Resolved cedar-solve master: $SHA"
+          echo "Resolved cedar-solve ${CEDAR_SOLVE_TAG}: $SHA"
           echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "tag=$CEDAR_SOLVE_TAG" >> $GITHUB_OUTPUT
 
       - name: Run image build
         env:
@@ -200,6 +205,11 @@ jobs:
       - name: Compress image
         run: |
           ls -lh build/output/
+          # build-image.sh ran under sudo and produced a root-owned image.
+          # xz preserves source metadata by default and would fail trying
+          # to chown the output to root (we're running as the runner user
+          # in this step). Hand ownership back to runner first.
+          sudo chown -R "$(id -u):$(id -g)" build/output/
           xz -T0 -9 build/output/efinder.img
           ls -lh build/output/
 

@@ -1,35 +1,15 @@
-# eFinder Python dependencies.
+# eFinder Python dependencies installed via pip wheels.
 #
-# Heavy compiled deps come from apt (python3-numpy, python3-scipy,
-# python3-pil, python3-flask, python3-picamera2). The venv is created
-# with --system-site-packages so they're visible. Listing them here
-# would trigger pip to reinstall, which under qemu emulation in the
-# image-build chroot can take 30+ minutes per package.
+# This file does NOT include cedar-solve, which install.sh handles
+# separately because it needs --no-deps + --no-build-isolation flags
+# that don't fit into a requirements.txt.
 #
-# Pip's job here is to install:
-#   * cedar-solve (needs to come from git HEAD, see below)
-#   * grpcio + grpcio-tools (small, aarch64 wheels published on PyPI)
-#   * protobuf (small, pure-Python+wheels)
-# These resolve to wheels on PyPI for aarch64, no source build needed.
+# It also does NOT include the heavy compiled libraries
+# (numpy, scipy, Pillow, flask, picamera2) -- those come from apt
+# (python3-numpy, python3-scipy, python3-pil, python3-flask,
+# python3-picamera2) and are visible to the venv via
+# --system-site-packages.
 
-# Plate solver. cedar-solve's PyPI release (0.5.1, June 2024) is older
-# than the GitHub HEAD; we use the API surface from HEAD (status codes,
-# target_pixel + target_sky_coord parameters, RA_target/Dec_target keys).
-# Install directly from GitHub.
-#
-# CI pins this to a specific commit at image-build time via the
-# EFINDER_CEDAR_SOLVE_REF env var (substituted by install.sh). Manual
-# installs default to whatever's on master.
-#
-# --no-build-isolation makes pip use the venv's existing numpy/scipy
-# from --system-site-packages rather than installing fresh ones in
-# an isolated build environment (which would trigger source builds).
-#
-# Package still installs as the `tetra3` Python module after install.
-git+https://github.com/smroid/cedar-solve.git@master#egg=cedar-solve
-
-# gRPC stack for cedar-detect client. Aarch64 wheels published on PyPI
-# for current Python; small and fast to install.
 grpcio
 grpcio-tools
 protobuf

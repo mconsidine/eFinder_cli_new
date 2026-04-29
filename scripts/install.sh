@@ -116,30 +116,59 @@ LOG "Installing Python deps"
 sudo -u "$EFINDER_USER" "$EFINDER_DIR/venv/bin/pip" install --upgrade pip \
   || FAIL "pip install --upgrade pip failed"
 
-# Optionally pin cedar-solve to a specific commit/tag for reproducibility.
-# Default is whatever requirements.txt has (which is @master).
-CEDAR_SOLVE_REF="${EFINDER_CEDAR_SOLVE_REF:-}"
-REQ_FILE="$EFINDER_DIR/requirements.txt"
-if [ -n "$CEDAR_SOLVE_REF" ]; then
-  LOG "Pinning cedar-solve to ref: $CEDAR_SOLVE_REF"
-  REQ_FILE=$(mktemp)
-  trap "rm -f $REQ_FILE" EXIT
-  sed "s|cedar-solve.git@master|cedar-solve.git@$CEDAR_SOLVE_REF|" \
-    "$EFINDER_DIR/requirements.txt" > "$REQ_FILE"
-  chown "$EFINDER_USER:$EFINDER_USER" "$REQ_FILE"
-fi
+# Python 3.13's venv doesn't include setuptools/wheel by default
+# (distutils removal aftermath). --no-build-isolation needs them
+# present in the venv so PEP 517 build backends can find them.
+sudo -u "$EFINDER_USER" "$EFINDER_DIR/venv/bin/pip" install --upgrade \
+  setuptools wheel \
+  || FAIL "pip install setuptools wheel failed"
 
-# --no-build-isolation: build cedar-solve using the venv's existing
-# numpy/scipy/etc from --system-site-packages, rather than installing
-# fresh ones in an isolated build env. Without this, pip would download
-# numpy source and compile under qemu (45+ minutes).
-#
-# This requires setuptools and wheel in the venv, which python -m venv
-# provides by default in modern Python.
+# --- Step 1: install non-cedar-solve Python deps via pip wheels.
+# These resolve to aarch64 wheels on PyPI and don't need anything special.
+# (Listed explicitly here rather than via requirements.txt so this script
+# is self-contained for image-build context.)
+LOG "Installing wheel-based Python deps"
 sudo -u "$EFINDER_USER" "$EFINDER_DIR/venv/bin/pip" install \
+  grpcio grpcio-tools protobuf \
+  || FAIL "pip install of grpcio/grpcio-tools/protobuf failed"
+
+# --- Step 2: install cedar-solve from git with --no-deps
+# Cedar-solve's pyproject.toml pins numpy<2, Pillow<9, scipy<2 (defensive
+# caps from June 2024 when 0.5.1 was tagged). Trixie ships numpy 2.x
+# and newer Pillow/scipy. The pins aren't required; cedar-solve works
+# fine with current versions. We bypass the resolver:
+#
+#   --no-deps             skip the version-conflict check entirely
+#   --no-build-isolation  build using the apt-provided numpy from
+#                         --system-site-packages, rather than pulling
+#                         a fresh numpy<2 source tarball
+#
+# numpy/scipy/Pillow come from apt (python3-numpy, python3-scipy,
+# python3-pil) installed earlier.
+CEDAR_SOLVE_REF="${EFINDER_CEDAR_SOLVE_REF:-master}"
+LOG "Installing cedar-solve from git@${CEDAR_SOLVE_REF} (no-deps, no-build-isolation)"
+sudo -u "$EFINDER_USER" "$EFINDER_DIR/venv/bin/pip" install \
+  --no-deps \
   --no-build-isolation \
-  -r "$REQ_FILE" \
-  || FAIL "pip install requirements.txt failed"
+  "git+https://github.com/smroid/cedar-solve.git@${CEDAR_SOLVE_REF}#egg=cedar-solve" \
+  || FAIL "pip install of cedar-solve failed"
+
+# Sanity check: tetra3 module must be importable, and runtime deps must
+# be present (we get them from apt, but verify in case of skew).
+sudo -u "$EFINDER_USER" "$EFINDER_DIR/venv/bin/python" -c "
+import sys
+mods_required = ['numpy', 'scipy', 'PIL', 'tetra3']
+missing = []
+for m in mods_required:
+    try:
+        __import__(m)
+    except ImportError as e:
+        missing.append(f'{m}: {e}')
+if missing:
+    print('Missing runtime deps:', missing, file=sys.stderr)
+    sys.exit(1)
+print('All cedar-solve runtime deps importable')
+" || FAIL "cedar-solve runtime dependency check failed"
 
 # --- Install cedar-detect-server -----------------------------------
 

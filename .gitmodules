@@ -1,0 +1,3 @@
+[submodule "cedar-detect"]
+	path = cedar-detect
+	url = https://github.com/smroid/cedar-detect

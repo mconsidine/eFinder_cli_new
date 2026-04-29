@@ -1,0 +1,80 @@
+#!/bin/bash
+# eFinder in-place updater. Pulls latest application code, fetches the
+# latest cedar-detect-server binary from GitHub releases, and restarts
+# the service.
+#
+# Usage:
+#   sudo /usr/local/bin/efinder-update                 # latest release
+#   sudo /usr/local/bin/efinder-update v0.7.1          # specific version
+#
+# Refuses to update if the working tree has local modifications.
+
+set -euo pipefail
+
+EFINDER_DIR=/opt/efinder
+REPO=mconsidine/eFinder_cli
+BINARY=cedar-detect-server
+TARGET_VERSION="${1:-latest}"
+
+LOG() { echo "[update] $*"; }
+FAIL() { echo "[update] ERROR: $*" >&2; exit 1; }
+
+[ "$EUID" -eq 0 ] || FAIL "must run as root"
+
+# --- Refuse to clobber local changes -----------------------------------------
+
+cd "$EFINDER_DIR"
+if ! git diff --quiet HEAD 2>/dev/null; then
+  FAIL "Local modifications in $EFINDER_DIR. Refusing to update. Resolve manually."
+fi
+
+# --- Fetch application code ---------------------------------------------------
+
+LOG "Fetching latest code"
+sudo -u efinder git fetch --tags origin
+
+if [ "$TARGET_VERSION" = "latest" ]; then
+  TAG=$(sudo -u efinder git tag --sort=-v:refname | head -n1)
+  [ -n "$TAG" ] || FAIL "No tags found in repo"
+else
+  TAG="$TARGET_VERSION"
+fi
+
+LOG "Updating to $TAG"
+sudo -u efinder git checkout --quiet "$TAG"
+
+# --- Refresh Python deps ------------------------------------------------------
+
+LOG "Refreshing Python dependencies"
+sudo -u efinder "$EFINDER_DIR/venv/bin/pip" install --quiet --upgrade \
+  -r "$EFINDER_DIR/requirements.txt"
+
+# --- Pull cedar-detect binary -------------------------------------------------
+
+LOG "Fetching cedar-detect-server binary for $TAG"
+if [ "$TAG" = "latest" ] || [ -z "$TAG" ]; then
+  URL=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+        | grep "browser_download_url" \
+        | grep "${BINARY}" \
+        | head -n1 \
+        | cut -d'"' -f4)
+else
+  URL="https://github.com/${REPO}/releases/download/${TAG}/${BINARY}"
+fi
+
+[ -n "$URL" ] || FAIL "Could not resolve cedar-detect-server URL"
+
+TMP=$(mktemp)
+trap 'rm -f "$TMP"' EXIT
+curl -fsSL "$URL" -o "$TMP"
+install -m 755 "$TMP" /usr/local/bin/${BINARY}
+
+# --- Record version & restart -------------------------------------------------
+
+echo "$TAG $(date -u +%Y-%m-%dT%H:%M:%SZ)" > /var/lib/efinder/version
+
+LOG "Restarting services"
+systemctl restart cedar-detect.service
+systemctl restart efinder.service
+
+LOG "Update to $TAG complete"

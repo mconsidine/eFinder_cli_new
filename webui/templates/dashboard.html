@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}eFinder Status{% endblock %}
+{% block content %}
+
+{% if not status_ok %}
+  <div class="alert alert-error">
+    <strong>Daemon not reachable:</strong> {{ status_error }}
+  </div>
+{% else %}
+
+<section class="grid">
+  <div class="card" id="solution-card">
+    <h2>Pointing</h2>
+    {% if solution and solution.solved %}
+      <div class="big-coords">
+        <div><span class="label">RA</span> <span id="ra">{{ solution.ra_str }}</span></div>
+        <div><span class="label">Dec</span> <span id="dec">{{ solution.dec_str }}</span></div>
+      </div>
+      <dl class="stats">
+        <dt>Stars</dt><dd id="stars">{{ solution.stars }}</dd>
+        <dt>Matches</dt><dd id="matches">{{ solution.matches }}</dd>
+        <dt>Solve time</dt><dd id="solve_ms">{{ "%.0f"|format(solution.solve_ms) }} ms</dd>
+        <dt>Peak</dt><dd id="peak">{{ solution.peak }}</dd>
+        <dt>FOV</dt><dd id="fov">{{ "%.3f"|format(solution.fov_deg) }}&deg;</dd>
+      </dl>
+    {% else %}
+      <div class="not-solved" id="not-solved">
+        <div>No solve yet</div>
+        <dl class="stats">
+          <dt>Stars detected</dt><dd id="stars">{{ solution.stars if solution else 0 }}</dd>
+          <dt>Peak</dt><dd id="peak">{{ solution.peak if solution else 0 }}</dd>
+          <dt>Status</dt><dd id="status">{{ solution.status if solution else 0 }}</dd>
+        </dl>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Calibration</h2>
+    {% if calibration %}
+      <dl class="stats">
+        <dt>State</dt><dd>{{ calibration.state }}</dd>
+        <dt>Committed FOV</dt>
+        <dd>{{ "%.4f"|format(calibration.committed_fov)|safe if calibration.committed_fov else "(not yet)" }} &deg;</dd>
+        <dt>Window</dt>
+        <dd>{{ calibration.window_filled }} / {{ calibration.window_size }}</dd>
+        {% if calibration.recent_median %}
+          <dt>Recent median</dt><dd>{{ "%.4f"|format(calibration.recent_median) }}&deg;</dd>
+        {% endif %}
+        {% if calibration.recent_stddev %}
+          <dt>Recent stddev</dt><dd>{{ "%.4f"|format(calibration.recent_stddev) }}&deg;</dd>
+        {% endif %}
+      </dl>
+      <form method="post" action="{{ url_for('calibration_reset') }}"
+            onsubmit="return confirm('Reset FOV calibration? You\\'ll lose the converged value and the next ~30 solves will recalibrate.');">
+        <button type="submit" class="btn btn-warning">Recalibrate</button>
+      </form>
+    {% else %}
+      <p class="muted">{{ cal_error or "no data" }}</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Boresight</h2>
+    {% if boresight %}
+      <dl class="stats">
+        <dt>X (pixels)</dt><dd>{{ "%.1f"|format(boresight.x) }}</dd>
+        <dt>Y (pixels)</dt><dd>{{ "%.1f"|format(boresight.y) }}</dd>
+      </dl>
+    {% endif %}
+    <form method="post" action="{{ url_for('boresight_center') }}">
+      <button type="submit" class="btn">Reset to center</button>
+    </form>
+    <p class="hint">Use SkySafari "Align" on a known star for normal alignment.</p>
+  </div>
+
+  <div class="card">
+    <h2>Exposure</h2>
+    {% if exposure %}
+      <form method="post" action="{{ url_for('exposure_set') }}">
+        <label>
+          Exposure (seconds)
+          <input type="number" step="0.01" min="0.001" max="10"
+                 name="exposure_s" value="{{ exposure.exposure_s }}">
+        </label>
+        <label>
+          Gain (read-only here)
+          <input type="number" value="{{ exposure.gain }}" disabled>
+        </label>
+        <label class="checkbox">
+          <input type="checkbox" name="persist"> Save to config
+        </label>
+        <button type="submit" class="btn">Apply</button>
+      </form>
+    {% endif %}
+  </div>
+</section>
+
+<script>
+async function refresh() {
+  try {
+    const r = await fetch('/api/status');
+    if (!r.ok) return;
+    const data = await r.json();
+    if (!data.status.ok) return;
+    const sol = data.status.result.solution;
+    if (sol.solved) {
+      const raH = sol.ra_deg / 15;
+      document.getElementById('ra').textContent = formatHMS(raH);
+      document.getElementById('dec').textContent = formatDMS(sol.dec_deg);
+      document.getElementById('stars').textContent = sol.stars;
+      const m = document.getElementById('matches');
+      if (m) m.textContent = sol.matches;
+      const sms = document.getElementById('solve_ms');
+      if (sms) sms.textContent = sol.solve_ms.toFixed(0) + ' ms';
+      const peak = document.getElementById('peak');
+      if (peak) peak.textContent = sol.peak;
+      const fov = document.getElementById('fov');
+      if (fov) fov.textContent = sol.fov_deg.toFixed(3) + '\u00b0';
+    } else {
+      const ns = document.getElementById('not-solved');
+      if (ns) {
+        document.getElementById('stars').textContent = sol.stars || 0;
+        document.getElementById('peak').textContent = sol.peak || 0;
+        const status = document.getElementById('status');
+        if (status) status.textContent = sol.status || 0;
+      }
+    }
+  } catch (e) {
+    console.error(e);
+  }
+}
+function formatHMS(h) {
+  h = ((h % 24) + 24) % 24;
+  const H = Math.floor(h);
+  const m = (h - H) * 60;
+  const M = Math.floor(m);
+  const S = Math.round((m - M) * 60);
+  return `${String(H).padStart(2,'0')}h${String(M).padStart(2,'0')}m${String(S).padStart(2,'0')}s`;
+}
+function formatDMS(d) {
+  const sign = d >= 0 ? '+' : '-';
+  const a = Math.abs(d);
+  const D = Math.floor(a);
+  const m = (a - D) * 60;
+  const M = Math.floor(m);
+  const S = Math.round((m - M) * 60);
+  return `${sign}${String(D).padStart(2,'0')}\u00b0${String(M).padStart(2,'0')}'${String(S).padStart(2,'0')}"`;
+}
+setInterval(refresh, 1500);
+</script>
+
+{% endif %}
+{% endblock %}

@@ -1,0 +1,88 @@
+"""
+Internal command types between comms and worker processes.
+
+Different from maint.py: maint.py is the JSON wire protocol on the
+maintenance Unix socket. This module defines the in-process queue
+messages that comms uses to ask camera_proc and solver_proc to do
+things on its behalf.
+
+Why a separate layer: a maintenance command might need to touch
+multiple workers, or might be answerable by comms alone, or might
+trigger a sequence of actions. The maintenance handler is the right
+place to know that; the workers shouldn't.
+"""
+
+import dataclasses
+import time
+from typing import Any, Optional
+
+
+# ----- Solver commands -----
+
+@dataclasses.dataclass
+class SolverCmd:
+    """Generic command sent from comms to the solver."""
+    op: str
+    args: dict
+    request_id: int  # for correlating responses
+    requested_at: float = 0.0
+
+    def __post_init__(self):
+        if self.requested_at == 0.0:
+            self.requested_at = time.monotonic()
+
+
+@dataclasses.dataclass
+class SolverCmdReply:
+    request_id: int
+    ok: bool
+    result: Any = None
+    error: str = ""
+    completed_at: float = 0.0
+
+    def __post_init__(self):
+        if self.completed_at == 0.0:
+            self.completed_at = time.monotonic()
+
+
+# Op names. Kept as constants so typos are caught at lookup time
+# rather than silently treated as unknown commands.
+SOLVER_OP_CALIBRATION_STATUS = "calibration_status"
+SOLVER_OP_CALIBRATION_RESET = "calibration_reset"
+SOLVER_OP_POLAR_START = "polar_start"
+SOLVER_OP_POLAR_STATUS = "polar_status"
+SOLVER_OP_POLAR_CANCEL = "polar_cancel"
+SOLVER_OP_POLAR_SET_LATITUDE = "polar_set_latitude"
+
+
+# ----- Camera commands -----
+
+@dataclasses.dataclass
+class CameraCmd:
+    op: str
+    args: dict
+    request_id: int
+    requested_at: float = 0.0
+
+    def __post_init__(self):
+        if self.requested_at == 0.0:
+            self.requested_at = time.monotonic()
+
+
+@dataclasses.dataclass
+class CameraCmdReply:
+    request_id: int
+    ok: bool
+    result: Any = None
+    error: str = ""
+    completed_at: float = 0.0
+
+    def __post_init__(self):
+        if self.completed_at == 0.0:
+            self.completed_at = time.monotonic()
+
+
+CAMERA_OP_GET_EXPOSURE = "get_exposure"
+CAMERA_OP_SET_EXPOSURE = "set_exposure"
+CAMERA_OP_SET_GAIN = "set_gain"
+# Future: capture_dark_frame, capture_hot_pixel_map

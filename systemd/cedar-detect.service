@@ -1,0 +1,36 @@
+[Unit]
+Description=Cedar-detect star centroid extraction gRPC server
+Documentation=https://github.com/smroid/cedar-detect
+After=network.target
+
+[Service]
+Type=simple
+User=efinder
+Group=efinder
+RuntimeDirectory=cedar-detect
+RuntimeDirectoryMode=0755
+ExecStart=/usr/local/bin/cedar-detect-server \
+  --listen unix:///run/cedar-detect/cedar-detect.sock
+Restart=on-failure
+RestartSec=2
+
+# Pin to the same core as the solver. Cedar-detect work and tetra3 solving
+# are sequential per frame (Python solver blocks on the gRPC call), so
+# co-locating them on one core is fine and leaves the other cores free
+# for camera and comms.
+CPUAffinity=3
+Nice=-5
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run/cedar-detect
+# IMPORTANT: do NOT set PrivateTmp=true. We rely on /dev/shm being shared
+# with the eFinder process so cedar-detect can read frames directly via
+# the shmem_name protobuf field rather than transferring 730 KB per call
+# over gRPC. PrivateTmp would not isolate /dev/shm specifically (that's a
+# separate tmpfs), but we leave it off to be unambiguous about intent.
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,40 @@
+[Unit]
+Description=eFinder plate-solving telescope finder
+Documentation=https://github.com/mconsidine/eFinder_cli
+After=cedar-detect.service network.target
+Requires=cedar-detect.service
+
+[Service]
+Type=simple
+User=efinder
+Group=efinder
+WorkingDirectory=/opt/efinder
+Environment=PYTHONUNBUFFERED=1
+Environment=EFINDER_CONFIG=/etc/efinder/efinder.conf
+
+# Create /run/efinder owned by efinder:efinder for the maintenance
+# Unix socket. Mode 0750 on the directory; the socket itself gets
+# chmod 0660 by the comms process. Group members can connect.
+RuntimeDirectory=efinder
+RuntimeDirectoryMode=0750
+
+# Use the venv's interpreter so picamera2/cedar-solve are on the path
+ExecStart=/opt/efinder/venv/bin/python -m efinder.efinder_main
+
+Restart=on-failure
+RestartSec=5
+
+# The main process spawns three children and pins them itself via
+# os.sched_setaffinity. We don't set CPUAffinity at the unit level
+# because that would constrain ALL children to a single mask.
+
+# Hardening (loose -- the application talks to a camera and binds a port)
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/efinder /etc/efinder /run/efinder
+
+# Wait for the cedar-detect socket to exist before starting our children
+ExecStartPre=/usr/bin/timeout 30 sh -c 'until [ -S /run/cedar-detect/cedar-detect.sock ]; do sleep 0.2; done'
+
+[Install]
+WantedBy=multi-user.target

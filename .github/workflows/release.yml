@@ -1,0 +1,203 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cedar-detect/**'
+      - 'efinder/**'
+      - 'webui/**'
+      - 'scripts/**'
+      - 'systemd/**'
+      - 'build/**'
+      - 'requirements.txt'
+      - '.github/workflows/release.yml'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      build_image:
+        description: "Also build SD card image (slow)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write   # needed by softprops/action-gh-release
+
+jobs:
+
+  # --------------------------------------------------------------------------
+  # Build cedar-detect-server cross-compiled for aarch64 / Cortex-A53.
+  # Runs on every push so we have a known-good binary in CI artifacts.
+  # On a tagged release, also attaches it to the release.
+  # --------------------------------------------------------------------------
+  cedar-detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Verify cedar-detect submodule is present
+        run: |
+          if [ ! -f cedar-detect/Cargo.toml ]; then
+            echo "::error::cedar-detect/ is missing or empty."
+            echo "Add the submodule with:"
+            echo "  git submodule add https://github.com/smroid/cedar-detect cedar-detect"
+            echo "  git commit -m 'vendor cedar-detect'"
+            exit 1
+          fi
+          # Sanity check the bin name is what we expect
+          if ! grep -q 'name = "cedar-detect-server"' cedar-detect/Cargo.toml \
+             && ! grep -q 'cedar_detect_server' cedar-detect/src/bin/cedar_detect_server.rs 2>/dev/null \
+             && ! ls cedar-detect/src/bin/cedar*server* >/dev/null 2>&1; then
+            echo "::warning::Could not confirm cedar-detect-server bin name. Build may fail."
+          fi
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler gcc-aarch64-linux-gnu
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cedar-detect/target
+          key: cargo-aarch64-cortex-a53-${{ hashFiles('cedar-detect/Cargo.lock') }}
+          restore-keys: cargo-aarch64-cortex-a53-
+
+      - name: Build cedar-detect-server
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          # Optimize for the Pi Zero 2W's specific CPU. ~5-10% speedup.
+          RUSTFLAGS: "-C target-cpu=cortex-a53"
+        working-directory: cedar-detect
+        run: |
+          cargo build --release \
+            --target aarch64-unknown-linux-gnu \
+            --bin cedar-detect-server
+
+      - name: Strip and verify binary
+        run: |
+          BIN=cedar-detect/target/aarch64-unknown-linux-gnu/release/cedar-detect-server
+          if [ ! -x "$BIN" ]; then
+            echo "::error::Binary not found at $BIN"
+            ls -la cedar-detect/target/aarch64-unknown-linux-gnu/release/ || true
+            exit 1
+          fi
+          aarch64-linux-gnu-strip "$BIN"
+          file "$BIN" | tee /tmp/binary-info
+          if ! grep -q "ARM aarch64" /tmp/binary-info; then
+            echo "::error::Binary is not aarch64. Check cross-compile config."
+            exit 1
+          fi
+          ls -lh "$BIN"
+
+      - name: Upload as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cedar-detect-server-aarch64
+          path: cedar-detect/target/aarch64-unknown-linux-gnu/release/cedar-detect-server
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Attach to release (if tag build)
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: cedar-detect/target/aarch64-unknown-linux-gnu/release/cedar-detect-server
+          fail_on_unmatched_files: true
+
+  # --------------------------------------------------------------------------
+  # Build the SD card image. Only runs on tagged releases (or manual dispatch
+  # with build_image=true). Depends on cedar-detect job so the binary is
+  # available as an artifact when this job starts.
+  # --------------------------------------------------------------------------
+  image:
+    needs: cedar-detect
+    if: |
+      github.event_name == 'release' ||
+      (github.event_name == 'workflow_dispatch' && inputs.build_image)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version tag
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=manual-$(date -u +%Y%m%d-%H%M)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install image-build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            qemu-user-static binfmt-support \
+            xz-utils kpartx parted \
+            wget curl ca-certificates
+
+      # Pull the cedar-detect-server binary that the previous job built.
+      - name: Download cedar-detect-server artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cedar-detect-server-aarch64
+          path: build/output
+
+      - name: Verify downloaded artifact
+        run: |
+          BIN=build/output/cedar-detect-server
+          [ -x "$BIN" ] || chmod +x "$BIN" 2>/dev/null || true
+          ls -lh "$BIN"
+          file "$BIN" | grep -q "ARM aarch64" || {
+            echo "::error::Downloaded artifact is not aarch64"
+            exit 1
+          }
+
+      - name: Run image build
+        env:
+          EFINDER_VERSION: ${{ steps.ver.outputs.tag }}
+          REPO: ${{ github.repository }}
+          # Tell build-image.sh to use the local binary rather than fetch
+          # from a release URL. This is the only path during CI because
+          # the release may not be fully populated yet.
+          CEDAR_DETECT_BIN_LOCAL: ${{ github.workspace }}/build/output/cedar-detect-server
+        run: |
+          sudo -E bash build/build-image.sh
+
+      - name: Compress image
+        run: |
+          ls -lh build/output/
+          xz -T0 -9 build/output/efinder.img
+          ls -lh build/output/
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/output/efinder.img.xz
+          fail_on_unmatched_files: true
+
+      - name: Upload as workflow artifact (manual builds)
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: efinder-image-${{ steps.ver.outputs.tag }}
+          path: build/output/efinder.img.xz
+          retention-days: 14
+          if-no-files-found: error

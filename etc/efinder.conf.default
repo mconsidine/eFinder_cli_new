@@ -1,0 +1,81 @@
+# eFinder configuration
+# Lines are key:value, # for comments. Blank lines ignored.
+# Reload after edits with:  sudo systemctl restart efinder
+# Environment overrides:    EFINDER_<KEY> wins over this file.
+
+# ---- Camera ----
+frame_width: 960
+frame_height: 760
+exposure_s: 0.2
+gain: 20.0
+
+# Adaptive exposure (off by default until tuned per setup)
+auto_exposure_enabled: false
+auto_exposure_target_stars: 20
+auto_exposure_min_s: 0.05
+auto_exposure_max_s: 1.0
+
+# Optical properties.
+#
+# fov_deg is the camera's horizontal field of view in degrees. Start
+# with a coarse measurement; the solver self-calibrates after ~30
+# successful solves and writes the converged value back here. While
+# fov_calibrated is false, the solver uses fov_max_error_deg as the
+# tolerance window. Once fov_calibrated is true, it tightens to
+# fov_calibrated_max_error_deg, which makes solving faster and more
+# robust against false positives.
+fov_deg: 13.5
+arcsec_per_pixel: 50.8
+fov_calibrated: false
+fov_calibrated_stddev: 0.05
+fov_calibrated_max_error_deg: 0.1
+
+# Distortion coefficient. 0.0 = no estimate (cedar-solve fits it
+# per-solve). Updated automatically once the calibrator converges
+# on a stable value.
+distortion: 0.0
+
+# ---- Observer location ----
+# Latitude/longitude are normally set automatically when SkySafari (or
+# any LX200 client) connects -- it sends :St / :Sg with its GPS-derived
+# location. The values get persisted here so the next session has them
+# even before a client connects. Manual override:
+#   efinder-ctl polar set-latitude 44.5
+latitude_deg: 0.0
+longitude_deg: 0.0
+
+# ---- Cedar-detect ----
+cedar_detect_socket: unix:///run/cedar-detect/cedar-detect.sock
+detect_sigma: 8.0
+detect_hot_pixels: true
+detect_use_binned: false
+
+# ---- Cedar-solve ----
+tetra3_db: default_database
+fov_max_error_deg: 1.0
+min_centroids: 8
+solve_timeout_ms: 1500
+match_threshold: 0.00001
+match_radius: 0.01
+
+# ---- Boresight offset (pixel coordinates) ----
+# Updated automatically by the alignment workflow (SkySafari sync).
+# Defaults are image center.
+boresight_y: 380.0
+boresight_x: 480.0
+
+# ---- Comms ----
+lx200_port: 4060
+lx200_client_timeout_s: 30.0
+
+# ---- CPU affinity (Pi Zero 2W: 4 cores) ----
+cpu_camera: 2
+cpu_solver: 3
+cpu_comms: 1
+
+# ---- Diagnostics ----
+save_failed_frames: false
+log_solve_stats_every_n: 50
+
+# ---- Shutdown ----
+shutdown_grace_s: 2.0

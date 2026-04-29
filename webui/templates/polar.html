@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Polar Alignment{% endblock %}
+{% block content %}
+
+<h2>Polar alignment</h2>
+
+{% if not ok %}
+  <div class="alert alert-error">{{ error }}</div>
+{% else %}
+
+<div class="card">
+  <p>
+    The eFinder uses a three-point method: rotate your mount in RA only,
+    pausing between rotations. The eFinder watches the camera's path
+    across the sky and computes how far the mount's RA axis is from
+    the celestial pole.
+  </p>
+</div>
+
+<div class="card" id="polar-status">
+  {% include "_polar_inner.html" %}
+</div>
+
+<div class="card">
+  <h3>Latitude</h3>
+  {% if polar.latitude_deg %}
+    <p>Currently set to <strong>{{ "%.4f"|format(polar.latitude_deg) }}&deg;</strong>.</p>
+  {% else %}
+    <p class="muted">
+      Latitude not set. Connect SkySafari (which sends GPS coordinates
+      automatically), or enter manually below.
+    </p>
+  {% endif %}
+  <form method="post" action="{{ url_for('polar_set_latitude') }}">
+    <label>
+      Latitude (degrees, negative for southern hemisphere)
+      <input type="number" step="0.0001" min="-90" max="90"
+             name="latitude_deg" required
+             {% if polar.latitude_deg %}value="{{ polar.latitude_deg }}"{% endif %}>
+    </label>
+    <button type="submit" class="btn">Save</button>
+  </form>
+</div>
+
+<div class="actions">
+  {% if polar.state in ('idle', 'done', 'error') %}
+    <form method="post" action="{{ url_for('polar_start') }}">
+      <button type="submit" class="btn btn-primary">Start polar alignment</button>
+    </form>
+  {% else %}
+    <form method="post" action="{{ url_for('polar_cancel') }}">
+      <button type="submit" class="btn btn-warning">Cancel</button>
+    </form>
+  {% endif %}
+</div>
+
+<script>
+// Auto-refresh the polar status block every 800 ms while a session is active.
+async function refresh() {
+  try {
+    const r = await fetch('/api/polar/status');
+    if (!r.ok) return;
+    const data = await r.json();
+    if (!data.ok) return;
+    // We can't render Jinja from JS; just reload if state changes.
+    const ps = data.result.state;
+    const cur = document.body.dataset.polarState || '{{ polar.state }}';
+    document.body.dataset.polarState = ps;
+    // Always update the dynamic numbers
+    const points = document.getElementById('points-captured');
+    if (points) points.textContent = data.result.points_captured;
+    const action = document.getElementById('needed-action');
+    if (action) action.textContent = data.result.needed_action;
+    const elapsed = document.getElementById('elapsed');
+    if (elapsed) elapsed.textContent = data.result.elapsed_s.toFixed(0) + ' s';
+    // If state changed, do a hard reload to re-render the Jinja partial
+    if (ps !== cur) {
+      location.reload();
+    }
+  } catch (e) {
+    console.error(e);
+  }
+}
+setInterval(refresh, 800);
+</script>
+
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,83 @@
+name: Build eFinder Pi image
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag for the image (e.g., v0.7.0)"
+        required: true
+        default: "manual"
+
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+    # The chroot build is I/O-heavy. Free runners have 14 GB disk; we should
+    # be fine but watch usage if you add things to the image.
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version tag
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install image-build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            qemu-user-static binfmt-support \
+            xz-utils kpartx parted \
+            wget curl ca-certificates
+
+      - name: Wait for cedar-detect-server build artifact
+        # We rely on the build-cedar-detect.yml workflow having attached
+        # the binary to this same release. Confirm before proceeding.
+        if: github.event_name == 'release'
+        run: |
+          for i in 1 2 3 4 5; do
+            URL="https://github.com/${{ github.repository }}/releases/download/${{ steps.ver.outputs.tag }}/cedar-detect-server"
+            if curl -fsSL --head "$URL" >/dev/null; then
+              echo "Found cedar-detect-server in release"
+              exit 0
+            fi
+            echo "cedar-detect-server not yet attached, waiting..."
+            sleep 30
+          done
+          echo "cedar-detect-server binary not attached to release; aborting"
+          exit 1
+
+      - name: Run image build
+        env:
+          EFINDER_VERSION: ${{ steps.ver.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          sudo -E bash build/build-image.sh
+
+      - name: Compress image
+        run: |
+          ls -lh build/output/
+          xz -T0 -9 build/output/efinder.img
+          ls -lh build/output/
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/output/efinder.img.xz
+
+      - name: Upload as workflow artifact (for manual builds)
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: efinder-image-${{ steps.ver.outputs.tag }}
+          path: build/output/efinder.img.xz
+          retention-days: 14

@@ -1,0 +1,15 @@
+[Unit]
+Description=eFinder first-boot configuration
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!/var/lib/efinder/firstboot.done
+
+[Service]
+Type=oneshot
+ExecStart=/opt/efinder/scripts/firstboot.sh
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

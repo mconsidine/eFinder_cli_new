@@ -1,0 +1,14 @@
+# Core scientific stack already provided by python3-numpy at apt level
+# (kept here as a backstop for non-system-site-packages installs).
+numpy>=1.24
+
+# Plate solver -- cedar-solve installs as the tetra3 module
+cedar-solve>=0.6.0
+
+# gRPC client for cedar-detect
+grpcio>=1.62
+grpcio-tools>=1.62
+protobuf>=4.25
+
+# Web UI
+flask>=3.0

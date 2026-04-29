@@ -68,7 +68,9 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
   python3 python3-venv python3-pip python3-dev \
-  python3-numpy python3-picamera2 python3-libcamera \
+  python3-numpy python3-scipy python3-pil \
+  python3-picamera2 python3-libcamera \
+  python3-flask \
   build-essential pkg-config \
   curl ca-certificates git \
   protobuf-compiler
@@ -127,7 +129,16 @@ if [ -n "$CEDAR_SOLVE_REF" ]; then
   chown "$EFINDER_USER:$EFINDER_USER" "$REQ_FILE"
 fi
 
-sudo -u "$EFINDER_USER" "$EFINDER_DIR/venv/bin/pip" install -r "$REQ_FILE" \
+# --no-build-isolation: build cedar-solve using the venv's existing
+# numpy/scipy/etc from --system-site-packages, rather than installing
+# fresh ones in an isolated build env. Without this, pip would download
+# numpy source and compile under qemu (45+ minutes).
+#
+# This requires setuptools and wheel in the venv, which python -m venv
+# provides by default in modern Python.
+sudo -u "$EFINDER_USER" "$EFINDER_DIR/venv/bin/pip" install \
+  --no-build-isolation \
+  -r "$REQ_FILE" \
   || FAIL "pip install requirements.txt failed"
 
 # --- Install cedar-detect-server -----------------------------------
@@ -162,9 +173,7 @@ fi
 LOG "Generating Python gRPC stubs from vendored cedar_detect.proto"
 [ -f "$EFINDER_DIR/proto/cedar_detect.proto" ] \
   || FAIL "missing $EFINDER_DIR/proto/cedar_detect.proto"
-sudo -u "$EFINDER_USER" "$EFINDER_DIR/venv/bin/pip" install --quiet \
-  grpcio grpcio-tools \
-  || FAIL "pip install grpcio grpcio-tools failed"
+# grpcio + grpcio-tools were installed by requirements.txt above
 sudo -u "$EFINDER_USER" "$EFINDER_DIR/venv/bin/python" \
   -m grpc_tools.protoc \
   -I "$EFINDER_DIR/proto" \

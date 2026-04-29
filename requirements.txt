@@ -1,27 +1,35 @@
 # eFinder Python dependencies.
 #
-# numpy and picamera2 come from apt (python3-numpy, python3-picamera2)
-# via the venv's --system-site-packages flag, so they're not strictly
-# required here. Listed as a backstop for non-system-site-packages
-# installs; pip will see they're already satisfied and skip.
-numpy
+# Heavy compiled deps come from apt (python3-numpy, python3-scipy,
+# python3-pil, python3-flask, python3-picamera2). The venv is created
+# with --system-site-packages so they're visible. Listing them here
+# would trigger pip to reinstall, which under qemu emulation in the
+# image-build chroot can take 30+ minutes per package.
+#
+# Pip's job here is to install:
+#   * cedar-solve (needs to come from git HEAD, see below)
+#   * grpcio + grpcio-tools (small, aarch64 wheels published on PyPI)
+#   * protobuf (small, pure-Python+wheels)
+# These resolve to wheels on PyPI for aarch64, no source build needed.
 
 # Plate solver. cedar-solve's PyPI release (0.5.1, June 2024) is older
 # than the GitHub HEAD; we use the API surface from HEAD (status codes,
 # target_pixel + target_sky_coord parameters, RA_target/Dec_target keys).
 # Install directly from GitHub.
 #
-# Pin to a specific commit hash for reproducibility -- bump the hash
-# when you've validated against a newer cedar-solve revision. The
-# package still installs as the `tetra3` module after install.
+# CI pins this to a specific commit at image-build time via the
+# EFINDER_CEDAR_SOLVE_REF env var (substituted by install.sh). Manual
+# installs default to whatever's on master.
+#
+# --no-build-isolation makes pip use the venv's existing numpy/scipy
+# from --system-site-packages rather than installing fresh ones in
+# an isolated build environment (which would trigger source builds).
+#
+# Package still installs as the `tetra3` Python module after install.
 git+https://github.com/smroid/cedar-solve.git@master#egg=cedar-solve
 
-# gRPC client for cedar-detect. Versions on PyPI for aarch64 wheels:
-# grpcio has aarch64 manylinux wheels from 1.34+, recent releases work.
-# grpcio-tools is needed only at install time (proto compilation).
+# gRPC stack for cedar-detect client. Aarch64 wheels published on PyPI
+# for current Python; small and fast to install.
 grpcio
 grpcio-tools
 protobuf
-
-# Web UI
-flask

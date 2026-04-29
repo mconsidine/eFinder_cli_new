@@ -145,7 +145,7 @@ sudo -u "$EFINDER_USER" "$EFINDER_DIR/venv/bin/pip" install \
 #
 # numpy/scipy/Pillow come from apt (python3-numpy, python3-scipy,
 # python3-pil) installed earlier.
-CEDAR_SOLVE_REF="${EFINDER_CEDAR_SOLVE_REF:-master}"
+CEDAR_SOLVE_REF="${EFINDER_CEDAR_SOLVE_REF:-v0.6.0}"
 LOG "Installing cedar-solve from git@${CEDAR_SOLVE_REF} (no-deps, no-build-isolation)"
 sudo -u "$EFINDER_USER" "$EFINDER_DIR/venv/bin/pip" install \
   --no-deps \
@@ -231,7 +231,9 @@ install -m 440 "$EFINDER_DIR/etc/sudoers.d/efinder-update" /etc/sudoers.d/efinde
 
 install -m 755 "$EFINDER_DIR/scripts/efinder-update" /usr/local/bin/
 install -m 755 "$EFINDER_DIR/scripts/efinder-ctl"    /usr/local/bin/
-install -m 755 "$EFINDER_DIR/scripts/firstboot.sh"   "$EFINDER_DIR/scripts/firstboot.sh"
+# firstboot.sh runs in place from /opt/efinder/scripts/ per the systemd
+# unit (no copy needed); just ensure it's executable.
+chmod 755 "$EFINDER_DIR/scripts/firstboot.sh"
 
 mkdir -p /etc/efinder /var/lib/efinder
 chown -R "$EFINDER_USER:$EFINDER_USER" /var/lib/efinder

@@ -67,53 +67,13 @@ else
   WARN "libcamera-hello not installed; cannot verify camera"
 fi
 
-# --- Hostname -----------------------------------------------------------------
-
-CURRENT_HOST=$(hostname)
-if [ "$CURRENT_HOST" != "efinder" ]; then
-  LOG "Setting hostname: $CURRENT_HOST -> efinder"
-  hostnamectl set-hostname efinder
-  if grep -q "^127\.0\.1\.1" /etc/hosts; then
-    sed -i "s/^127\.0\.1\.1.*/127.0.1.1\tefinder/" /etc/hosts
-  else
-    echo "127.0.1.1	efinder" >> /etc/hosts
-  fi
-fi
-
-# --- Wi-Fi regulatory country -------------------------------------------------
-# wlan0 needs a country code set or many drivers refuse to bring up an AP.
-# Default to US; user can change later via raspi-config.
-
-if command -v raspi-config >/dev/null 2>&1; then
-  if ! grep -qE '^country=' /etc/wpa_supplicant/wpa_supplicant.conf 2>/dev/null; then
-    LOG "Setting Wi-Fi country to US (use raspi-config to change)"
-    raspi-config nonint do_wifi_country US 2>/dev/null || \
-      WARN "raspi-config do_wifi_country failed; AP may not come up"
-  fi
-fi
-
-# --- Avahi configuration ------------------------------------------------------
-# Avahi by default advertises on every interface, which is what we want
-# (USB gadget, Wi-Fi AP, Wi-Fi station). Just make sure it's running and
-# the host name matches.
-
-AVAHI_CONF=/etc/avahi/avahi-daemon.conf
-if [ -f "$AVAHI_CONF" ]; then
-  # Set host-name to 'efinder' so .local resolution works.
-  if grep -qE '^#?host-name=' "$AVAHI_CONF"; then
-    sed -i 's/^#\?host-name=.*/host-name=efinder/' "$AVAHI_CONF"
-  else
-    sed -i '/^\[server\]/a host-name=efinder' "$AVAHI_CONF"
-  fi
-fi
-
+# --- Avahi: ensure it is running (config was pre-baked at image build) --------
 if systemctl list-unit-files avahi-daemon.service >/dev/null 2>&1; then
-  systemctl enable --now avahi-daemon.service || \
+  systemctl enable --now avahi-daemon.service 2>/dev/null || \
     WARN "Could not enable avahi-daemon"
   systemctl restart avahi-daemon.service 2>/dev/null || true
 else
   WARN "avahi-daemon not installed; mDNS efinder.local won't work"
-  WARN "Install with: sudo apt install avahi-daemon"
 fi
 
 # --- USB Ethernet gadget profile ---------------------------------------------
@@ -189,60 +149,8 @@ if nmcli -t -f DEVICE,STATE dev | grep -q "^wlan0:disconnected"; then
     || WARN "Could not bring up AP (it'll auto-connect at next boot)"
 fi
 
-# --- Tmpfs for /var/tmp -------------------------------------------------------
-
-if ! grep -q "^tmpfs /var/tmp" /etc/fstab; then
-  LOG "Adding /var/tmp tmpfs mount"
-  echo "tmpfs /var/tmp tmpfs nodev,nosuid,size=10M 0 0" >> /etc/fstab
-fi
-
 mkdir -p /var/lib/efinder/captures
 chown -R efinder:efinder /var/lib/efinder
-
-# --- NumPy / BLAS diagnostic --------------------------------------------------
-
-PY=/opt/efinder/venv/bin/python
-if [ -x "$PY" ]; then
-  BLAS_INFO=$("$PY" -c "
-import numpy as np
-try:
-    info = np.show_config(mode='dicts')
-    libs = []
-    for sect in ('blas_info', 'blas_opt_info', 'lapack_info', 'lapack_opt_info'):
-        d = info.get(sect, {}) or {}
-        for lib in d.get('libraries', []) or []:
-            libs.append(lib)
-    if libs:
-        print('NumPy BLAS libs: ' + ', '.join(sorted(set(libs))))
-    else:
-        print('NumPy BLAS libs: unknown (newer NumPy uses different config layout)')
-except Exception as e:
-    print(f'NumPy config introspection failed: {e}')
-" 2>&1 || echo "could not introspect numpy config")
-  LOG "$BLAS_INFO"
-  if echo "$BLAS_INFO" | grep -qi "openblas\|blis\|mkl"; then
-    LOG "Optimized BLAS detected; NumPy linear algebra should be fast"
-  elif echo "$BLAS_INFO" | grep -qi "blas\|lapack"; then
-    WARN "NumPy may be using reference BLAS (slow). Consider:"
-    WARN "  sudo apt install libopenblas0 && sudo systemctl restart efinder"
-  fi
-else
-  LOG "Skipping NumPy/BLAS diagnostic (venv not yet present)"
-fi
-
-# --- vm.swappiness -- minimize SD card wear -----------------------------------
-
-if ! grep -q "^vm.swappiness" /etc/sysctl.conf; then
-  echo "vm.swappiness = 0" >> /etc/sysctl.conf
-fi
-
-# --- Default config file ------------------------------------------------------
-
-if [ ! -f /etc/efinder/efinder.conf ]; then
-  LOG "Installing default config"
-  cp /opt/efinder/etc/efinder.conf.default /etc/efinder/efinder.conf
-  chown efinder:efinder /etc/efinder/efinder.conf
-fi
 
 # --- Mark done ----------------------------------------------------------------
 

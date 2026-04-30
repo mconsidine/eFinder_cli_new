@@ -121,6 +121,10 @@ def main():
             if p.is_alive():
                 log.warning("Force killing %s", p.name)
                 p.kill()
+        try:
+            manager.shutdown()
+        except Exception:
+            pass
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, _shutdown)
@@ -133,7 +137,19 @@ def main():
                 if not p.is_alive():
                     log.error("Worker %s exited (code=%s); aborting",
                               p.name, p.exitcode)
-                    _shutdown(signal.SIGTERM, None)
+                    for q in procs:
+                        if q.is_alive():
+                            q.terminate()
+                    time.sleep(cfg.shutdown_grace_s)
+                    for q in procs:
+                        if q.is_alive():
+                            log.warning("Force killing %s", q.name)
+                            q.kill()
+                    try:
+                        manager.shutdown()
+                    except Exception:
+                        pass
+                    sys.exit(1)
     finally:
         for shm in shms:
             try: shm.close(); shm.unlink()

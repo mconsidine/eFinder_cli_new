@@ -78,6 +78,7 @@ apt-get install -y --no-install-recommends \
   python3-numpy python3-scipy python3-pil \
   python3-picamera2 python3-libcamera \
   python3-flask \
+  libopenblas0 \
   build-essential pkg-config \
   curl ca-certificates git \
   protobuf-compiler \
@@ -305,6 +306,47 @@ if [ -f "$CMDLINE_TXT" ]; then
       sed -i '1s|^|modules-load=dwc2,g_ether |' "$CMDLINE_TXT"
     fi
   fi
+fi
+
+# --- Pre-bake static first-boot settings into the image ---------------------
+# These are device-independent facts that don't need the MAC address or any
+# runtime state.  Doing them here (in chroot) means firstboot.sh has less to
+# do and the image boots directly into a known-good state.
+
+# Hostname
+hostnamectl --no-ask-password set-hostname efinder 2>/dev/null || \
+  echo "efinder" > /etc/hostname
+if grep -q "^127\.0\.1\.1" /etc/hosts; then
+  sed -i "s/^127\.0\.1\.1.*/127.0.1.1\tefinder/" /etc/hosts
+else
+  echo "127.0.1.1	efinder" >> /etc/hosts
+fi
+
+# Avahi: pre-set host-name so efinder.local resolves on first power-up.
+AVAHI_CONF=/etc/avahi/avahi-daemon.conf
+if [ -f "$AVAHI_CONF" ]; then
+  if grep -qE '^#?host-name=' "$AVAHI_CONF"; then
+    sed -i 's/^#\?host-name=.*/host-name=efinder/' "$AVAHI_CONF"
+  else
+    sed -i '/^\[server\]/a host-name=efinder' "$AVAHI_CONF"
+  fi
+fi
+
+# Reduce SD card wear: never swap under normal operation.
+if ! grep -q "^vm.swappiness" /etc/sysctl.conf 2>/dev/null; then
+  echo "vm.swappiness = 0" >> /etc/sysctl.conf
+fi
+
+# Tmpfs for /var/tmp to avoid wearing the SD card with throwaway writes.
+if ! grep -q "^tmpfs /var/tmp" /etc/fstab 2>/dev/null; then
+  echo "tmpfs /var/tmp tmpfs nodev,nosuid,size=10M 0 0" >> /etc/fstab
+fi
+
+# WiFi regulatory country default. US is a safe default; the user can
+# change it with raspi-config after first boot.  Without any country code
+# many WiFi drivers refuse to bring up an AP.
+if command -v raspi-config >/dev/null 2>&1; then
+  raspi-config nonint do_wifi_country US 2>/dev/null || true
 fi
 
 # --- Enable services ---------------------------------------------------------

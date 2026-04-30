@@ -185,14 +185,26 @@ def _handle_lx200_command(cmd, latest_solution, align_state, cfg, shared_cfg,
                           align_request_q, align_response_q, ctx=None):
     if cmd == ":GR":
         sol = dict(latest_solution)
-        ra_hours = (sol["ra_deg"] / 15.0) if sol["solved"] else 0.0
-        return _format_ra(ra_hours).encode("ascii")
+        return _format_ra(sol["ra_deg"] / 15.0).encode("ascii")
     if cmd == ":GD":
         sol = dict(latest_solution)
-        dec = sol["dec_deg"] if sol["solved"] else 0.0
-        return _format_dec(dec).encode("ascii")
+        return _format_dec(sol["dec_deg"]).encode("ascii")
+
+    # Mount status. SkySafari sends this immediately on connect; if it gets
+    # no response (missing '#') it blocks waiting forever.
+    # Format: <MountType><Tracking><AlignmentStar># where
+    #   A=AltAz P=Polar G=GermanPolar  1=tracking 0=not  2=2-star aligned
+    # We present as a fixed alt-az mount that is always tracking. This
+    # satisfies SkySafari's init handshake; it does not affect :GR/:GD.
+    if cmd == ":GW":
+        return b"AT2#"
+
     if cmd in (":GVN", ":GVP"):
         return f"eFinder {cfg.version}#".encode("ascii")
+    # Other firmware-version queries (:GVF firmware string, :GVD date)
+    if cmd.startswith(":GV"):
+        return f"eFinder {cfg.version}#".encode("ascii")
+
     if cmd.startswith(":Sr"):
         ok = align_state.set_target_ra(cmd[3:])
         return b"1" if ok else b"0"
@@ -203,6 +215,7 @@ def _handle_lx200_command(cmd, latest_solution, align_state, cfg, shared_cfg,
         reply = _do_alignment(align_state, cfg, shared_cfg,
                               align_request_q, align_response_q)
         return reply.encode("ascii")
+
     # :St sets site latitude in LX200 high-precision form sDD*MM (or sDD*MM:SS).
     # Parse and propagate to the polar aligner if we have a maint context.
     if cmd.startswith(":St"):
@@ -242,9 +255,38 @@ def _handle_lx200_command(cmd, latest_solution, align_state, cfg, shared_cfg,
         return b"1"
     if cmd.startswith(":SC"):
         return b"1Updating Planetary Data#                              #"
-    if cmd == ":Q":
-        return b""
-    return b""
+
+    # Slew / motion commands -- we don't move anything, just acknowledge.
+    if cmd == ":MS":
+        return b"0"   # 0 = slewing (accepted); SkySafari expects this
+    if cmd.startswith(":M") or cmd.startswith(":R") or cmd == ":Q":
+        return b""    # no-reply motion/rate commands; empty is correct
+
+    # Tracking rate: report sidereal.
+    if cmd == ":GT":
+        return b"60.0#"
+
+    # Slew rate: report maximum.
+    if cmd == ":Gr":
+        return b"4#"
+
+    # Time/date queries: return plausible static values. SkySafari uses its
+    # own GPS/clock; it sends these to sync the mount, not to read from it.
+    if cmd in (":GS", ":GL"):
+        return b"00:00:00#"
+    if cmd == ":GC":
+        return b"01/01/00#"
+    if cmd == ":GG":
+        return b"+00#"
+
+    # Altitude/azimuth: not computed; return zero.
+    if cmd in (":GA", ":GZ"):
+        return b"+00*00#"
+
+    # Any other unrecognised command: return an empty-but-terminated response
+    # so the client's '#'-delimited parser can move on instead of blocking.
+    log.debug("Unhandled LX200 command: %r", cmd)
+    return b"#"
 
 
 # ----------------------------------------------------------------------
@@ -450,7 +492,7 @@ class _MaintContext:
         self.camera_cmd_reply_q = camera_cmd_reply_q
 
 
-def _serve_maint_socket(ctx, socket_path=None, group_name="efinder"):
+def _serve_maint_socket(ctx, socket_path=None):
     """Bind the Unix socket and serve clients in a loop."""
     if socket_path is None:
         socket_path = SOCKET_PATH
@@ -526,6 +568,23 @@ def _serve_lx200(latest_solution, shared_cfg, cfg,
 
     while True:
         client, addr = sock.accept()
+        # Disable Nagle so small LX200 responses (5-15 bytes) are sent
+        # immediately rather than waiting to be batched.  Without this,
+        # the OS can hold a ":GR#" reply for tens of milliseconds hoping
+        # for more data to combine with; SkySafari interprets the delay
+        # as a connection problem and disconnects.
+        client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        # TCP keepalives let the kernel detect a dead connection (dropped
+        # WiFi, phone out of range) without waiting for lx200_client_timeout_s.
+        # After 10 s idle: send a probe every 5 s, drop after 3 failures
+        # (worst-case detection ~25 s vs the default 30 s recv timeout).
+        client.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        try:
+            client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 10)
+            client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5)
+            client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+        except AttributeError:
+            pass  # TCP_KEEPIDLE etc. are Linux-only; SO_KEEPALIVE still helps
         client.settimeout(cfg.lx200_client_timeout_s)
         log.info("LX200 client from %s", addr)
         align_state = CommsAlignState()

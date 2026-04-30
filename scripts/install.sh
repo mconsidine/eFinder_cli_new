@@ -78,6 +78,7 @@ apt-get install -y --no-install-recommends \
   python3-numpy python3-scipy python3-pil \
   python3-picamera2 python3-libcamera \
   python3-flask \
+  libopenblas0 \
   build-essential pkg-config \
   curl ca-certificates git \
   protobuf-compiler \

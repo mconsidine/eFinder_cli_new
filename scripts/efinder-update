@@ -49,6 +49,25 @@ LOG "Refreshing Python dependencies"
 sudo -u efinder "$EFINDER_DIR/venv/bin/pip" install --quiet --upgrade \
   -r "$EFINDER_DIR/requirements.txt"
 
+# cedar-solve is not in requirements.txt (needs --no-deps --no-build-isolation)
+# so we upgrade it explicitly.  Pinned to the same ref install.sh uses;
+# use EFINDER_CEDAR_SOLVE_REF to override if needed.
+CEDAR_SOLVE_REF="${EFINDER_CEDAR_SOLVE_REF:-v0.6.0}"
+LOG "Refreshing cedar-solve from git@${CEDAR_SOLVE_REF}"
+sudo -u efinder "$EFINDER_DIR/venv/bin/pip" install --quiet \
+  --no-deps --no-build-isolation \
+  "git+https://github.com/smroid/cedar-solve.git@${CEDAR_SOLVE_REF}#egg=cedar-solve"
+
+# Regenerate gRPC stubs in case cedar_detect.proto changed.
+LOG "Regenerating gRPC stubs"
+sudo -u efinder "$EFINDER_DIR/venv/bin/python" \
+  -m grpc_tools.protoc \
+  -I "$EFINDER_DIR/proto" \
+  --python_out="$EFINDER_DIR/proto" \
+  --grpc_python_out="$EFINDER_DIR/proto" \
+  "$EFINDER_DIR/proto/cedar_detect.proto" \
+  || FAIL "protoc stub regeneration failed"
+
 # --- Pull cedar-detect binary -------------------------------------------------
 
 LOG "Fetching cedar-detect-server binary for $TAG"

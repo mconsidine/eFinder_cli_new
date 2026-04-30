@@ -1,13 +1,16 @@
 name: Build cedar-detect-server (aarch64)
 
+# Standalone cedar-detect build: runs on push so every main-branch commit
+# has a tested binary artifact available for development.  Release builds
+# are handled by release.yml (which chains cedar-detect + image in order);
+# keeping the release trigger here would duplicate that work and race to
+# attach a second copy of the binary to the same release.
 on:
   push:
     branches: [main]
     paths:
       - 'cedar-detect/**'
       - '.github/workflows/build-cedar-detect.yml'
-  release:
-    types: [published]
   workflow_dispatch:
 
 jobs:
@@ -77,8 +80,3 @@ jobs:
           path: cedar-detect/target/aarch64-unknown-linux-gnu/release/cedar-detect-server
           retention-days: 30
 
-      - name: Attach to release (if tag build)
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: cedar-detect/target/aarch64-unknown-linux-gnu/release/cedar-detect-server

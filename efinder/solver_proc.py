@@ -21,6 +21,7 @@ in the response are where the scope points (after offset).
 
 import logging
 import os
+import pathlib
 import sys
 import time
 
@@ -51,8 +52,11 @@ def _pin_to_cpu(cpu: int) -> None:
 
 
 def _empty_solution(stars=0, peak=0, noise=0.0, solve_ms=0.0, status=0):
+    # Intentionally omits ra_deg/dec_deg/roll_deg/fov_deg so that
+    # latest_solution keeps the last successful values.  comms_proc
+    # always serves those fields to SkySafari; zeroing them on every
+    # failed frame would cause the mount position to jump to 0h 0°.
     return {
-        "ra_deg": 0.0, "dec_deg": 0.0, "roll_deg": 0.0, "fov_deg": 0.0,
         "stars": int(stars), "matches": 0, "peak": int(peak),
         "noise": float(noise), "solve_ms": float(solve_ms),
         "solved": False, "status": int(status),
@@ -162,7 +166,7 @@ def solver_main(slots, latest_solution, shared_cfg,
     )
     _pin_to_cpu(cfg.cpu_solver)
 
-    proto_dir = "/opt/efinder/proto"
+    proto_dir = str(pathlib.Path(__file__).parent.parent / "proto")
     if proto_dir not in sys.path:
         sys.path.insert(0, proto_dir)
 

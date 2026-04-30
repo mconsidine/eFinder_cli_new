@@ -121,6 +121,10 @@ def main():
             if p.is_alive():
                 log.warning("Force killing %s", p.name)
                 p.kill()
+        try:
+            manager.shutdown()
+        except Exception:
+            pass
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, _shutdown)
@@ -141,6 +145,10 @@ def main():
                         if q.is_alive():
                             log.warning("Force killing %s", q.name)
                             q.kill()
+                    try:
+                        manager.shutdown()
+                    except Exception:
+                        pass
                     sys.exit(1)
     finally:
         for shm in shms:

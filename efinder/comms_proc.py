@@ -185,12 +185,10 @@ def _handle_lx200_command(cmd, latest_solution, align_state, cfg, shared_cfg,
                           align_request_q, align_response_q, ctx=None):
     if cmd == ":GR":
         sol = dict(latest_solution)
-        ra_hours = (sol["ra_deg"] / 15.0) if sol["solved"] else 0.0
-        return _format_ra(ra_hours).encode("ascii")
+        return _format_ra(sol["ra_deg"] / 15.0).encode("ascii")
     if cmd == ":GD":
         sol = dict(latest_solution)
-        dec = sol["dec_deg"] if sol["solved"] else 0.0
-        return _format_dec(dec).encode("ascii")
+        return _format_dec(sol["dec_deg"]).encode("ascii")
     if cmd in (":GVN", ":GVP"):
         return f"eFinder {cfg.version}#".encode("ascii")
     if cmd.startswith(":Sr"):
@@ -450,7 +448,7 @@ class _MaintContext:
         self.camera_cmd_reply_q = camera_cmd_reply_q
 
 
-def _serve_maint_socket(ctx, socket_path=None, group_name="efinder"):
+def _serve_maint_socket(ctx, socket_path=None):
     """Bind the Unix socket and serve clients in a loop."""
     if socket_path is None:
         socket_path = SOCKET_PATH

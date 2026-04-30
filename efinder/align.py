@@ -70,9 +70,10 @@ class CommsAlignState:
     third. State resets on connection close.
     """
 
-    # SkySafari can take a few seconds between :CM# and getting a reply
-    # back; we should err on the side of giving the solver enough time.
-    DEFAULT_TIMEOUT_S = 5.0
+    # Pi Zero 2W: one solve can take exposure_s + detect + up to
+    # solve_timeout_ms ≈ 0.2 + 0.1 + 1.5 = ~1.8 s.  Give the solver
+    # several attempts before giving up on a sync command.
+    DEFAULT_TIMEOUT_S = 15.0
 
     def __init__(self):
         self.target_ra_hours: Optional[float] = None

@@ -24,6 +24,7 @@ The Flask templates live in webui/templates/; static assets in
 webui/static/.
 """
 
+import io
 import json
 import logging
 import os
@@ -309,6 +310,78 @@ def config_page():
         content = f"Error reading {CONFIG_PATH}: {e}"
     return render_template("config.html",
                            path=CONFIG_PATH, content=content)
+
+
+# ---------------------------------------------------------------------
+# Live frame view
+# ---------------------------------------------------------------------
+
+@app.route("/frame.jpg")
+def frame_jpg():
+    """Current camera frame as JPEG with a red boresight circle overlaid.
+
+    Reads directly from the eFinder's shared-memory triple buffer (the
+    same /dev/shm segments that camera_proc writes and solver_proc reads).
+    No round-trip through the daemon is needed for the pixel data; only
+    the boresight coordinates come from the maintenance socket.
+
+    Returns 503 if the eFinder daemon is not running (SHM not present).
+    """
+    import numpy as np
+    from multiprocessing import shared_memory
+    from PIL import Image, ImageDraw
+
+    try:
+        from efinder.config import load_config
+        ecfg = load_config()
+        width, height = ecfg.frame_width, ecfg.frame_height
+    except Exception:
+        width, height = 960, 760
+
+    # Boresight from the live daemon (may differ from config if recently aligned).
+    bs_r = _safe_call("status")
+    bs = bs_r.result.get("boresight") if bs_r.ok and bs_r.result else None
+    cx = int(round(bs["x"])) if bs else width // 2
+    cy = int(round(bs["y"])) if bs else height // 2
+
+    # Read from the first accessible SHM slot.  We .copy() immediately so
+    # the buffer is detached before the camera can overwrite it.
+    from efinder.frame_slots import SHM_PREFIX, NUM_BUFFERS
+    frame = None
+    for i in range(NUM_BUFFERS):
+        try:
+            shm = shared_memory.SharedMemory(name=f"{SHM_PREFIX}_{i}")
+            frame = np.ndarray(
+                (height, width), dtype=np.uint8, buffer=shm.buf,
+            ).copy()
+            shm.close()
+            break
+        except Exception:
+            continue
+
+    if frame is None:
+        return "camera not running", 503, {"Content-Type": "text/plain"}
+
+    img = Image.fromarray(frame, mode="L").convert("RGB")
+    draw = ImageDraw.Draw(img)
+
+    r = 28  # circle radius in pixels (~6 % of frame width)
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r],
+                 outline=(220, 0, 0), width=2)
+    # Short tick marks extending outward from the circle
+    gap = 6
+    draw.line([cx - r - gap, cy, cx - r - 1, cy], fill=(220, 0, 0), width=1)
+    draw.line([cx + r + 1, cy, cx + r + gap, cy], fill=(220, 0, 0), width=1)
+    draw.line([cx, cy - r - gap, cx, cy - r - 1], fill=(220, 0, 0), width=1)
+    draw.line([cx, cy + r + 1, cx, cy + r + gap], fill=(220, 0, 0), width=1)
+
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=70)
+    buf.seek(0)
+    return (
+        buf.read(), 200,
+        {"Content-Type": "image/jpeg", "Cache-Control": "no-store, no-cache"},
+    )
 
 
 # ---------------------------------------------------------------------

@@ -161,6 +161,19 @@ pre.logs, pre.config {
   overflow-y: auto;
 }
 
+.card-wide {
+  grid-column: 1 / -1;  /* span all grid columns */
+}
+
+.live-view {
+  background: #0a0d12;
+  border: 1px solid #252a36;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+.live-view img { display: block; width: 100%; height: auto; }
+
 @media (max-width: 600px) {
   header { flex-direction: column; align-items: flex-start; }
   main { padding: 0 0.75rem; }

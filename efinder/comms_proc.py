@@ -189,8 +189,22 @@ def _handle_lx200_command(cmd, latest_solution, align_state, cfg, shared_cfg,
     if cmd == ":GD":
         sol = dict(latest_solution)
         return _format_dec(sol["dec_deg"]).encode("ascii")
+
+    # Mount status. SkySafari sends this immediately on connect; if it gets
+    # no response (missing '#') it blocks waiting forever.
+    # Format: <MountType><Tracking><AlignmentStar># where
+    #   A=AltAz P=Polar G=GermanPolar  1=tracking 0=not  2=2-star aligned
+    # We present as a fixed alt-az mount that is always tracking. This
+    # satisfies SkySafari's init handshake; it does not affect :GR/:GD.
+    if cmd == ":GW":
+        return b"AT2#"
+
     if cmd in (":GVN", ":GVP"):
         return f"eFinder {cfg.version}#".encode("ascii")
+    # Other firmware-version queries (:GVF firmware string, :GVD date)
+    if cmd.startswith(":GV"):
+        return f"eFinder {cfg.version}#".encode("ascii")
+
     if cmd.startswith(":Sr"):
         ok = align_state.set_target_ra(cmd[3:])
         return b"1" if ok else b"0"
@@ -201,6 +215,7 @@ def _handle_lx200_command(cmd, latest_solution, align_state, cfg, shared_cfg,
         reply = _do_alignment(align_state, cfg, shared_cfg,
                               align_request_q, align_response_q)
         return reply.encode("ascii")
+
     # :St sets site latitude in LX200 high-precision form sDD*MM (or sDD*MM:SS).
     # Parse and propagate to the polar aligner if we have a maint context.
     if cmd.startswith(":St"):
@@ -240,9 +255,38 @@ def _handle_lx200_command(cmd, latest_solution, align_state, cfg, shared_cfg,
         return b"1"
     if cmd.startswith(":SC"):
         return b"1Updating Planetary Data#                              #"
-    if cmd == ":Q":
-        return b""
-    return b""
+
+    # Slew / motion commands -- we don't move anything, just acknowledge.
+    if cmd == ":MS":
+        return b"0"   # 0 = slewing (accepted); SkySafari expects this
+    if cmd.startswith(":M") or cmd.startswith(":R") or cmd == ":Q":
+        return b""    # no-reply motion/rate commands; empty is correct
+
+    # Tracking rate: report sidereal.
+    if cmd == ":GT":
+        return b"60.0#"
+
+    # Slew rate: report maximum.
+    if cmd == ":Gr":
+        return b"4#"
+
+    # Time/date queries: return plausible static values. SkySafari uses its
+    # own GPS/clock; it sends these to sync the mount, not to read from it.
+    if cmd in (":GS", ":GL"):
+        return b"00:00:00#"
+    if cmd == ":GC":
+        return b"01/01/00#"
+    if cmd == ":GG":
+        return b"+00#"
+
+    # Altitude/azimuth: not computed; return zero.
+    if cmd in (":GA", ":GZ"):
+        return b"+00*00#"
+
+    # Any other unrecognised command: return an empty-but-terminated response
+    # so the client's '#'-delimited parser can move on instead of blocking.
+    log.debug("Unhandled LX200 command: %r", cmd)
+    return b"#"
 
 
 # ----------------------------------------------------------------------

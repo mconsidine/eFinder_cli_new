@@ -568,6 +568,23 @@ def _serve_lx200(latest_solution, shared_cfg, cfg,
 
     while True:
         client, addr = sock.accept()
+        # Disable Nagle so small LX200 responses (5-15 bytes) are sent
+        # immediately rather than waiting to be batched.  Without this,
+        # the OS can hold a ":GR#" reply for tens of milliseconds hoping
+        # for more data to combine with; SkySafari interprets the delay
+        # as a connection problem and disconnects.
+        client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        # TCP keepalives let the kernel detect a dead connection (dropped
+        # WiFi, phone out of range) without waiting for lx200_client_timeout_s.
+        # After 10 s idle: send a probe every 5 s, drop after 3 failures
+        # (worst-case detection ~25 s vs the default 30 s recv timeout).
+        client.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        try:
+            client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 10)
+            client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5)
+            client.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+        except AttributeError:
+            pass  # TCP_KEEPIDLE etc. are Linux-only; SO_KEEPALIVE still helps
         client.settimeout(cfg.lx200_client_timeout_s)
         log.info("LX200 client from %s", addr)
         align_state = CommsAlignState()

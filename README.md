@@ -251,9 +251,15 @@ tree has local modifications.
 push to `main` (cedar-detect paths) so development artifacts are always
 available without triggering a full image build.
 
-For local cross-compilation of cedar-detect: install the `cross` tool,
-then `cross build --release --target aarch64-unknown-linux-gnu` from
-the `cedar-detect/` submodule. Rsync the binary to the Pi and
+For local cross-compilation of cedar-detect (not normally needed —
+CI builds and attaches the binary automatically): populate the
+submodule, install `cross`, then build:
+```bash
+git submodule update --init --recursive
+cd cedar-detect
+cross build --release --target aarch64-unknown-linux-gnu
+```
+Rsync the resulting binary to the Pi and
 `sudo systemctl restart cedar-detect.service`.
 
 ## Known limitations and deferred work
@@ -297,14 +303,11 @@ the `cedar-detect/` submodule. Rsync the binary to the Pi and
 The build pipeline has been statically verified (`bash build/check-tree.sh`)
 but not yet run end-to-end. Likely items to debug on first CI run:
 
-- **cedar-detect submodule**: `release.yml` expects a submodule at
-  `cedar-detect/`. Add it once:
-  ```bash
-  git submodule add https://github.com/smroid/cedar-detect cedar-detect
-  git commit -m "vendor cedar-detect"
-  ```
-  The workflow has a pre-flight check that fails fast with this
-  instruction if the submodule is absent.
+- **cedar-detect submodule**: the submodule is already registered in
+  `.gitmodules`. CI checks it out automatically via
+  `actions/checkout@v4` with `submodules: recursive` — no manual step
+  needed. The workflow has a pre-flight check that will fail fast if
+  the submodule were ever removed.
 
 - **Image build timeout**: estimated 30–60 minutes. Bump
   `timeout-minutes:` in `release.yml` if the image job times out.

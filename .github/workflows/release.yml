@@ -217,6 +217,7 @@ jobs:
         if: github.event_name != 'release'
         uses: softprops/action-gh-release@v2
         with:
+          name: efinder-image-${{ steps.ver.outputs.tag }}
           files: build/output/efinder.img.xz
           fail_on_unmatched_files: true
 
